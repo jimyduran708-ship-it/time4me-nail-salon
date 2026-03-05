@@ -25,8 +25,16 @@ def normalize_to_e164(raw_phone: str, default_region: str = DEFAULT_REGION) -> s
     """
     if not raw_phone:
         return None
+    raw_phone = raw_phone.strip()
+    # WhatsApp sends Mexican mobiles as 521XXXXXXXXXX (13 digits without +).
+    # The phonenumbers library expects +52XXXXXXXXXX (10 digits after country code).
+    # Strip the legacy mobile '1' prefix for MX numbers.
+    if raw_phone.startswith("+521") and len(raw_phone) == 14:
+        raw_phone = "+52" + raw_phone[4:]
+    elif raw_phone.startswith("521") and len(raw_phone) == 13:
+        raw_phone = "+52" + raw_phone[3:]
     try:
-        parsed = phonenumbers.parse(raw_phone.strip(), default_region)
+        parsed = phonenumbers.parse(raw_phone, default_region)
         if not phonenumbers.is_valid_number(parsed):
             return None
         return phonenumbers.format_number(parsed, PhoneNumberFormat.E164)
