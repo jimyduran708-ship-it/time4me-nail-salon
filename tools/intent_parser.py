@@ -5,7 +5,7 @@ Handles both structured button payloads (interactive quick-replies)
 and freeform text with keyword matching.
 
 Returns one of:
-    'confirm' | 'cancel' | 'reschedule' | 'human' |
+    'confirm' | 'cancel' | 'reschedule' | 'human' | 'book' |
     'upsell_yes' | 'upsell_no' | 'unknown'
 """
 
@@ -50,6 +50,12 @@ UPSELL_NO_KEYWORDS = {
     "no", "no gracias", "esta bien", "está bien", "solo eso",
     "nada mas", "nada más", "no por ahora", "asi esta bien",
     "así está bien", "gracias",
+}
+
+BOOK_KEYWORDS = {
+    "agendar", "agenda", "cita", "reservar", "reserva",
+    "quiero cita", "hacer cita", "nueva cita", "turno",
+    "anotar", "apuntar", "programar", "quiero agendar", "pedir cita",
 }
 
 # Button payloads sent by the interactive message template
@@ -117,7 +123,9 @@ def parse_intent(message: dict, context: str = "reminder") -> str:
     if not normalized:
         return "unknown"
 
-    # Human and reschedule always take priority regardless of context
+    # Book, human, and reschedule always take priority regardless of context
+    if _matches(normalized, BOOK_KEYWORDS):
+        return "book"
     if _matches(normalized, HUMAN_KEYWORDS):
         return "human"
     if _matches(normalized, RESCHEDULE_KEYWORDS):
@@ -137,3 +145,99 @@ def parse_intent(message: dict, context: str = "reminder") -> str:
         return "confirm"
 
     return "unknown"
+
+
+# ── Slot selection parsing ──────────────────────────────────────────────────────
+
+_ORDINALS = {
+    "1": 0, "uno": 0, "primero": 0, "primera": 0,
+    "2": 1, "dos": 1, "segundo": 1, "segunda": 1,
+    "3": 2, "tres": 2, "tercero": 2, "tercera": 2,
+    "4": 3, "cuatro": 3, "cuarto": 3, "cuarta": 3,
+    "5": 4, "cinco": 4, "quinto": 4, "quinta": 4,
+}
+
+_DAY_NAMES = {
+    "lunes": 0, "martes": 1, "miercoles": 2, "jueves": 3,
+    "viernes": 4, "sabado": 5, "domingo": 6,
+}
+
+
+def parse_slot_index(message: dict, slots: list) -> "int | None":
+    """
+    Intenta hacer match entre un mensaje de WhatsApp y uno de los slots ofrecidos.
+    Acepta:
+      - Número o ordinal: "1", "el segundo"
+      - Día de la semana: "el martes", "martes"
+      - Día + hora: "el martes a las 3", "martes 10am"
+    Devuelve el índice (0-based) del slot elegido, o None si no se puede determinar.
+    """
+    if not slots:
+        return None
+
+    msg_type = message.get("type", "")
+
+    # Botón de lista interactiva con índice codificado
+    if msg_type == "interactive":
+        reply = message.get("interactive", {}).get("list_reply", {})
+        raw_id = reply.get("id", "")
+        if raw_id.startswith("SLOT_"):
+            try:
+                idx = int(raw_id.split("_")[1])
+                if 0 <= idx < len(slots):
+                    return idx
+            except (ValueError, IndexError):
+                pass
+
+    if msg_type != "text":
+        return None
+
+    raw = message.get("text", {}).get("body", "")
+    normalized = _normalize(raw)
+
+    # Buscar número / ordinal en el texto
+    for token in normalized.split():
+        if token in _ORDINALS:
+            idx = _ORDINALS[token]
+            if idx < len(slots):
+                return idx
+
+    # Buscar día de la semana
+    matched_day: "int | None" = None
+    for name, weekday in _DAY_NAMES.items():
+        if name in normalized:
+            matched_day = weekday
+            break
+
+    if matched_day is None:
+        return None
+
+    # Buscar hora mencionada (opcional)
+    import re
+    hour_match = re.search(r"\b(\d{1,2})\s*(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?", normalized)
+    mentioned_hour: "int | None" = None
+    if hour_match:
+        h = int(hour_match.group(1))
+        if "pm" in normalized or "p.m" in normalized:
+            if h != 12:
+                h += 12
+        mentioned_hour = h
+
+    # Filtrar slots por día de la semana (y hora si se especificó)
+    candidates = [
+        (i, s) for i, s in enumerate(slots)
+        if s.weekday() == matched_day
+    ]
+    if not candidates:
+        return None
+
+    if mentioned_hour is not None:
+        hour_match_slots = [(i, s) for i, s in candidates if s.hour == mentioned_hour]
+        if hour_match_slots:
+            return hour_match_slots[0][0]
+
+    # Si hay un solo candidato para ese día, elegirlo directamente
+    if len(candidates) == 1:
+        return candidates[0][0]
+
+    return None

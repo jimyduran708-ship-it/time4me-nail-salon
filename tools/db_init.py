@@ -83,6 +83,28 @@ def init_db() -> None:
                 ON message_log(whatsapp_message_id);
         """)
         conn.commit()
+
+        # Migrations — add columns / tables introduced after initial deploy
+        try:
+            conn.execute("ALTER TABLE appointments ADD COLUMN reschedule_state TEXT")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS booking_sessions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone       TEXT UNIQUE NOT NULL,
+                client_id   INTEGER REFERENCES clients(id),
+                step        TEXT NOT NULL,
+                service     TEXT,
+                slots_json  TEXT,
+                offered_at  TEXT,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.commit()
+
         print(f"[db_init] Database ready at: {DATABASE_PATH}")
     finally:
         conn.close()

@@ -254,3 +254,54 @@ def set_client_response(appointment_id: int, response: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def set_reschedule_state(appointment_id: int, state: dict) -> None:
+    """Persist reschedule conversation state as JSON."""
+    import json
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE appointments SET reschedule_state = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(state), now, appointment_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def clear_reschedule_state(appointment_id: int) -> None:
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE appointments SET reschedule_state = NULL, updated_at = ? WHERE id = ?",
+            (now, appointment_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_appointment_reschedule(appointment_id: int, new_start: str, new_end: str) -> None:
+    """
+    Mueve la cita a un nuevo slot.
+    Resetea confirmation_sent_at y reminder_sent_at para que el bot los reenvie.
+    """
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """UPDATE appointments
+               SET start_time = ?, end_time = ?,
+                   status = 'pending',
+                   confirmation_sent_at = NULL,
+                   reminder_sent_at = NULL,
+                   updated_at = ?
+               WHERE id = ?""",
+            (new_start, new_end, now, appointment_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()

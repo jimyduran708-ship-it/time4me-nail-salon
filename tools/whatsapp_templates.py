@@ -137,3 +137,32 @@ def appointment_confirmed_reply(client_name: str) -> str:
     Returns plain text — use send_text_message(), not send_template_message().
     """
     return f"¡Perfecto, {client_name}! Tu cita quedó confirmada. ¡Te esperamos! 💅"
+
+
+def format_slots_message(client_name: str, slots: list) -> str:
+    """
+    Mensaje freeform con los slots disponibles para reagendar.
+    Tono natural, no revela que es un bot.
+    """
+    numbers = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+    lines = []
+    for i, slot in enumerate(slots):
+        date_str, time_str = _format_datetime(slot.isoformat())
+        lines.append(f"{numbers[i]} {date_str} a las {time_str}")
+    options = "\n".join(lines)
+    return (
+        f"¡Claro, {client_name}! Estos son los horarios que tenemos disponibles:\n\n"
+        f"{options}\n\n"
+        "¿Cuál te queda mejor? Responde con el número 😊"
+    )
+
+
+def reschedule_confirmed_message(client_name: str, new_dt) -> str:
+    """
+    Confirmación freeform después de reagendar exitosamente.
+    """
+    date_str, time_str = _format_datetime(new_dt.isoformat())
+    return (
+        f"¡Listo, {client_name}! Ya cambié tu cita al {date_str} a las {time_str}. "
+        "¡Ahí te esperamos! 💅"
+    )

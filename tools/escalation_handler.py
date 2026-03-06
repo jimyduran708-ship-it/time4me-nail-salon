@@ -107,3 +107,46 @@ def notify_owner_no_phone(event_id: str, service: str, start_time: str) -> None:
 
     send_text_message(to=OWNER_WHATSAPP, text=message)
     logger.warning(f"[escalation] Missing phone alert sent for event {event_id}")
+
+
+def notify_owner_reschedule(
+    appointment: dict,
+    client: dict,
+    new_dt,
+    old_start: str = "",
+) -> None:
+    """
+    Avisa a la dueña que un cliente cambió su cita.
+    """
+    if not OWNER_WHATSAPP:
+        logger.warning("[escalation] OWNER_WHATSAPP not set — skipping reschedule notification")
+        return
+
+    from tools.whatsapp_sender import send_text_message
+    from tools.whatsapp_templates import _format_datetime
+
+    new_date_str, new_time_str = _format_datetime(new_dt.isoformat())
+    service = appointment.get("service", "servicio")
+    stylist = appointment.get("stylist", "sin asignar")
+    client_name = client.get("name", "cliente")
+    client_phone = client.get("phone", "")
+
+    old_info = ""
+    if old_start:
+        try:
+            old_date_str, old_time_str = _format_datetime(old_start)
+            old_info = f"\n📅 Antes: {old_date_str} a las {old_time_str}"
+        except Exception:
+            pass
+
+    message = (
+        f"🔄 *Cambio de cita*\n\n"
+        f"👤 Cliente: {client_name}\n"
+        f"📞 Tel: {client_phone}\n"
+        f"💅 Servicio: {service} con {stylist}"
+        f"{old_info}\n"
+        f"📅 Ahora: {new_date_str} a las {new_time_str}"
+    )
+
+    send_text_message(to=OWNER_WHATSAPP, text=message)
+    logger.info(f"[escalation] Reschedule notification sent to owner for appt {appointment.get('id')}")

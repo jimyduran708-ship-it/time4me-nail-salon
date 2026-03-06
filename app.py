@@ -15,6 +15,7 @@ Inbound message routing:
   unknown    → escalate to human
 """
 
+import json
 import os
 import logging
 import threading
@@ -150,16 +151,36 @@ def _route_message(sender_raw: str, message: dict, message_id: str) -> None:
     wa_phone = to_whatsapp_format(phone_e164)
     mark_message_read(message_id)
 
+    # ── Active booking session? Route to booking handler first ─────────────────
+    from tools.booking_handler import get_booking_session, handle_booking_step
+    booking_session = get_booking_session(wa_phone)
+    if booking_session:
+        handle_booking_step(booking_session, message, wa_phone, phone_e164)
+        return
+
     # Look up client
     client = get_client_by_phone(phone_e164)
     if not client:
-        logger.info(f"[route] Unknown sender {phone_e164} — escalating to human")
-        escalate_to_human(wa_phone, "cliente")
+        # Unknown client — start booking flow if they want to book, else escalate
+        if parse_intent(message) == "book":
+            from tools.booking_handler import start_booking
+            logger.info(f"[route] New client {phone_e164} wants to book")
+            start_booking(wa_phone, phone_e164, client=None)
+        else:
+            logger.info(f"[route] Unknown sender {phone_e164} — escalating to human")
+            escalate_to_human(wa_phone, "cliente")
         return
 
     # Log inbound message
     appt = get_latest_appointment_for_client(client["id"])
     _log_inbound(message, message_id, appt, client)
+
+    # If client is mid-reschedule, try to handle slot selection first
+    reschedule_state = json.loads(appt.get("reschedule_state") or "null") if appt else None
+    if reschedule_state:
+        from tools.reschedule_handler import handle_slot_selection
+        if handle_slot_selection(appt, client, message, reschedule_state, wa_phone):
+            return
 
     # Determine context for upsell intent disambiguation
     context = "upsell" if (appt and appt.get("upsell_sent_at") and not appt.get("client_response")) else "reminder"
@@ -201,7 +222,23 @@ def _route_message(sender_raw: str, message: dict, message_id: str) -> None:
                 client_id=client["id"],
             )
 
-    elif intent in ("human", "reschedule", "unknown"):
+    elif intent == "book":
+        from tools.booking_handler import start_booking
+        start_booking(wa_phone, phone_e164, client=client)
+
+    elif intent == "reschedule":
+        if appt:
+            from tools.reschedule_handler import initiate_reschedule
+            initiate_reschedule(appt, client, wa_phone)
+        else:
+            escalate_to_human(
+                to_phone=wa_phone,
+                client_name=client["name"],
+                appointment_id=None,
+                client_id=client["id"],
+            )
+
+    elif intent in ("human", "unknown"):
         escalate_to_human(
             to_phone=wa_phone,
             client_name=client["name"],
