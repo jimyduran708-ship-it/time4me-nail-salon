@@ -29,8 +29,10 @@ def _format_datetime(iso_str: str) -> tuple[str, str]:
     Convert ISO UTC string to local date and time strings in Spanish.
     Returns: ("sábado 14 de junio", "11:00 AM")
     """
-    dt_utc = datetime.fromisoformat(iso_str).replace(tzinfo=pytz.utc)
-    dt_local = dt_utc.astimezone(SALON_TIMEZONE)
+    dt = datetime.fromisoformat(iso_str)
+    if dt.tzinfo is None:
+        dt = pytz.utc.localize(dt)
+    dt_local = dt.astimezone(SALON_TIMEZONE)
     day_name = DAYS_ES[dt_local.weekday()]
     month_name = MONTHS_ES[dt_local.month]
     date_str = f"{day_name} {dt_local.day} de {month_name}"

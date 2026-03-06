@@ -153,7 +153,7 @@ def _handle_ask_name(session: dict, message: dict, wa_phone: str, phone_e164: st
         send_text_message(to=wa_phone, text="Por favor escribe tu nombre completo.")
         return
 
-    client = get_or_create_client(name=name, phone=phone_e164)
+    client, _ = get_or_create_client(name=name, phone=phone_e164)
     _save_session(wa_phone, step="ask_service", client_id=client["id"])
 
     send_text_message(
@@ -269,7 +269,7 @@ def _handle_ask_slot(
     client_id = session.get("client_id")
     client = get_client_by_id(client_id) if client_id else None
     if not client:
-        client = get_or_create_client(name="Cliente", phone=phone_e164)
+        client, _ = get_or_create_client(name="Cliente", phone=phone_e164)
 
     # Create Google Calendar event
     try:
