@@ -119,14 +119,17 @@ def main():
         print("\n--- PASO 1: Cliente envia mensaje de agendamiento ---")
         send(_process_webhook, "hola, quiero agendar una cita")
 
-        print("--- PASO 2: Cliente da su nombre ---")
-        send(_process_webhook, "Maria Lopez")
+        print("--- PASO 2: Cliente da su nombre (con frase) ---")
+        send(_process_webhook, "me llamo Luca Zavala")
 
         print("--- PASO 3: Cliente elige servicio ---")
-        send(_process_webhook, "Unas acrilicas")
+        send(_process_webhook, "Spa de manos")
 
-        print("--- PASO 4: Cliente elige slot (opcion 2) ---")
-        send(_process_webhook, "2")
+        print("--- PASO 4: Cliente indica preferencia de horario ---")
+        send(_process_webhook, "el sabado por la tarde")
+
+        print("--- PASO 5: Cliente confirma el slot propuesto ---")
+        send(_process_webhook, "sí, perfecto")
 
         print("\n" + "=" * 60)
         print("  FIN DE SIMULACION")

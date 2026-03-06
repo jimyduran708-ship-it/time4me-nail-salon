@@ -58,21 +58,23 @@ def get_booking_session(phone: str) -> dict | None:
 
 
 def _save_session(phone: str, step: str, client_id=None, service=None,
-                  slots_json=None, offered_at=None) -> None:
+                  slots_json=None, offered_at=None, proposed_slot=None) -> None:
     conn = get_connection()
     try:
         conn.execute(
             """
-            INSERT INTO booking_sessions (phone, client_id, step, service, slots_json, offered_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO booking_sessions
+                (phone, client_id, step, service, slots_json, offered_at, proposed_slot)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(phone) DO UPDATE SET
-                client_id  = excluded.client_id,
-                step       = excluded.step,
-                service    = excluded.service,
-                slots_json = excluded.slots_json,
-                offered_at = excluded.offered_at
+                client_id     = excluded.client_id,
+                step          = excluded.step,
+                service       = excluded.service,
+                slots_json    = excluded.slots_json,
+                offered_at    = excluded.offered_at,
+                proposed_slot = excluded.proposed_slot
             """,
-            (phone, client_id, step, service, slots_json, offered_at),
+            (phone, client_id, step, service, slots_json, offered_at, proposed_slot),
         )
         conn.commit()
     finally:
@@ -90,6 +92,51 @@ def _clear_session(phone: str) -> None:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
+_NAME_PREFIXES = [
+    "me llamo ", "soy ", "mi nombre es ", "me dicen ", "me llaman ",
+    "mi nombre: ", "nombre: ", "llamame ", "llamame ", "me puedes llamar ",
+    "pueden llamarme ", "soy la ", "soy el ",
+]
+_HONORIFICS = ["senora ", "senor ", "senorita ", "sra ", "sr ", "srta "]
+
+_STRONG_CANCEL = {"cancelar", "ya no", "no quiero", "no gracias", "olvida", "olvidalo", "olvidalo"}
+_AFFIRMATIVE = {
+    "si", "sí", "claro", "perfecto", "ok", "okay", "dale", "va", "listo",
+    "ese", "me funciona", "bien", "de acuerdo", "por supuesto", "me queda",
+    "ese me queda", "ese horario", "ahi", "ahí", "perfecto", "andale", "ándale",
+}
+
+
+def _extract_name(text: str) -> str:
+    """Elimina frases de presentación y regresa el nombre en Title Case."""
+    cleaned = text.strip().lower()
+    for prefix in _NAME_PREFIXES:
+        if cleaned.startswith(prefix):
+            text = text.strip()[len(prefix):]
+            cleaned = text.lower()
+            break
+    for hon in _HONORIFICS:
+        if cleaned.startswith(hon):
+            text = text.strip()[len(hon):]
+            break
+    return text.strip().title()
+
+
+def _first_name(full_name: str) -> str:
+    return full_name.strip().split()[0] if full_name.strip() else full_name
+
+
+def _load_slots(session: dict) -> list:
+    """Reconstruye la lista de datetimes desde el JSON guardado en sesión."""
+    slots = []
+    for iso in json.loads(session.get("slots_json") or "[]"):
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = TZ.localize(dt)
+        slots.append(dt.astimezone(TZ))
+    return slots
+
+
 def start_booking(wa_phone: str, phone_e164: str, client: dict | None) -> None:
     """
     Entry point: client expressed intent to book.
@@ -99,23 +146,20 @@ def start_booking(wa_phone: str, phone_e164: str, client: dict | None) -> None:
     from tools.whatsapp_sender import send_text_message
 
     if client:
+        first = _first_name(client["name"])
         _save_session(wa_phone, step="ask_service", client_id=client["id"])
         send_text_message(
             to=wa_phone,
-            text=(
-                f"Hola {client['name']}! Para agendar tu cita, "
-                "dime que servicio te gustaria:\n\n"
-                "Manicure / Pedicure / Unas acrilicas / Unas en gel / "
-                "Spa de manos / Exfoliacion de pies / Otro"
-            ),
+            text=f"¡Hola, {first}! Con gusto te agendo una cita. ¿Qué servicio te gustaría?",
         )
     else:
         _save_session(wa_phone, step="ask_name")
         send_text_message(
             to=wa_phone,
             text=(
-                "Hola! Bienvenida a Time 4 me Nail Salon. "
-                "Para agendar tu cita, primero dime tu nombre completo."
+                "¡Hola! Bienvenida a Time 4 me Nail Salón. "
+                "Con gusto te ayudo a agendar tu cita. "
+                "¿Me podrías dar tu nombre completo?"
             ),
         )
     logger.info(f"[booking] Started booking flow for {wa_phone}")
@@ -133,6 +177,8 @@ def handle_booking_step(
         _handle_ask_service(session, message, wa_phone)
     elif step == "ask_slot":
         _handle_ask_slot(session, message, wa_phone, phone_e164)
+    elif step == "ask_confirm_slot":
+        _handle_ask_confirm_slot(session, message, wa_phone, phone_e164)
     else:
         logger.warning(f"[booking] Unknown step '{step}' for {wa_phone}")
         _clear_session(wa_phone)
@@ -145,12 +191,13 @@ def _handle_ask_name(session: dict, message: dict, wa_phone: str, phone_e164: st
     from tools.db_clients import get_or_create_client
 
     if message.get("type") != "text":
-        send_text_message(to=wa_phone, text="Por favor escribe tu nombre completo.")
+        send_text_message(to=wa_phone, text="¿Me podrías escribir tu nombre completo?")
         return
 
-    name = message["text"]["body"].strip()
+    raw = message["text"]["body"].strip()
+    name = _extract_name(raw)
     if len(name) < 2:
-        send_text_message(to=wa_phone, text="Por favor escribe tu nombre completo.")
+        send_text_message(to=wa_phone, text="¿Me podrías escribir tu nombre completo?")
         return
 
     client, _ = get_or_create_client(name=name, phone=phone_e164)
@@ -158,12 +205,7 @@ def _handle_ask_name(session: dict, message: dict, wa_phone: str, phone_e164: st
 
     send_text_message(
         to=wa_phone,
-        text=(
-            f"Mucho gusto, {client['name']}! "
-            "Dime que servicio te gustaria:\n\n"
-            "Manicure / Pedicure / Unas acrilicas / Unas en gel / "
-            "Spa de manos / Exfoliacion de pies / Otro"
-        ),
+        text=f"¡Mucho gusto, {_first_name(client['name'])}! ¿Qué servicio te gustaría para tu cita?",
     )
     logger.info(f"[booking] Got name '{name}' for {wa_phone}")
 
@@ -171,25 +213,23 @@ def _handle_ask_name(session: dict, message: dict, wa_phone: str, phone_e164: st
 def _handle_ask_service(session: dict, message: dict, wa_phone: str) -> None:
     from tools.whatsapp_sender import send_text_message
     from tools.calendar_availability import get_available_slots
-    from tools.whatsapp_templates import format_slots_message
-    from tools.db_clients import get_client_by_id
 
     if message.get("type") != "text":
-        send_text_message(to=wa_phone, text="Por favor escribe el servicio que deseas.")
+        send_text_message(to=wa_phone, text="¿Qué servicio te gustaría?")
         return
 
     service = message["text"]["body"].strip()
     if len(service) < 2:
-        send_text_message(to=wa_phone, text="Por favor escribe el servicio que deseas.")
+        send_text_message(to=wa_phone, text="¿Qué servicio te gustaría?")
         return
 
-    slots = get_available_slots(days_ahead=7, max_slots=5)
+    slots = get_available_slots(days_ahead=7, max_slots=6)
     if not slots:
         send_text_message(
             to=wa_phone,
             text=(
-                "Por el momento no tenemos horarios disponibles en los proximos dias. "
-                "Te contactamos en cuanto haya un espacio libre!"
+                "Por el momento no tenemos horarios disponibles en los próximos días. "
+                "Te contactamos en cuanto tengamos un espacio libre. ¡Disculpa!"
             ),
         )
         _clear_session(wa_phone)
@@ -197,9 +237,6 @@ def _handle_ask_service(session: dict, message: dict, wa_phone: str) -> None:
         return
 
     client_id = session.get("client_id")
-    client = get_client_by_id(client_id) if client_id else None
-    client_name = client["name"] if client else "!"
-
     slots_json = json.dumps([s.isoformat() for s in slots])
     _save_session(
         wa_phone,
@@ -212,107 +249,172 @@ def _handle_ask_service(session: dict, message: dict, wa_phone: str) -> None:
 
     send_text_message(
         to=wa_phone,
-        text=format_slots_message(client_name, slots),
+        text=(
+            f"¡Perfecto! ¿Tienes alguna preferencia de día u horario? "
+            "Trabajamos de lunes a sábado de 10:00 a.m. a 7:00 p.m. 😊"
+        ),
     )
-    logger.info(f"[booking] Offered slots for service '{service}' to {wa_phone}")
+    logger.info(f"[booking] Asking slot preference for service '{service}' to {wa_phone}")
 
 
 def _handle_ask_slot(
     session: dict, message: dict, wa_phone: str, phone_e164: str
 ) -> None:
+    """Parsea preferencia de horario → propone el mejor slot → avanza a ask_confirm_slot."""
     from tools.whatsapp_sender import send_text_message
-    from tools.intent_parser import parse_slot_index, _normalize, _matches, CANCEL_KEYWORDS
+    from tools.intent_parser import parse_preferred_slot, _normalize, _matches, CANCEL_KEYWORDS
+    from tools.db_clients import get_client_by_id
+    from tools.whatsapp_templates import _format_datetime
+
+    slots = _load_slots(session)
+
+    if message.get("type") == "text":
+        normalized = _normalize(message["text"]["body"])
+        if _matches(normalized, CANCEL_KEYWORDS) and any(kw in normalized for kw in _STRONG_CANCEL):
+            _clear_session(wa_phone)
+            send_text_message(to=wa_phone, text="Sin problema, cuando quieras escríbenos. ¡Que tengas bonito día! 😊")
+            return
+
+    best_idx = parse_preferred_slot(message, slots)
+    if best_idx is None:
+        best_idx = 0  # default al primer slot disponible
+
+    proposed = slots[best_idx]
+    client_id = session.get("client_id")
+
+    _save_session(
+        wa_phone,
+        step="ask_confirm_slot",
+        client_id=client_id,
+        service=session.get("service"),
+        slots_json=session.get("slots_json"),
+        proposed_slot=proposed.isoformat(),
+    )
+
+    date_str, time_str = _format_datetime(proposed.isoformat())
+    send_text_message(
+        to=wa_phone,
+        text=f"Tengo disponible el {date_str} a las {time_str} — ¿te funciona ese horario? 😊",
+    )
+    logger.info(f"[booking] Proposed slot {proposed.isoformat()} to {wa_phone}")
+
+
+def _handle_ask_confirm_slot(
+    session: dict, message: dict, wa_phone: str, phone_e164: str
+) -> None:
+    """Cliente confirma o rechaza el slot propuesto."""
+    from tools.whatsapp_sender import send_text_message
+    from tools.intent_parser import parse_intent, _normalize, _matches, CANCEL_KEYWORDS
     from tools.calendar_writer import create_event
     from tools.db_appointments import upsert_appointment
     from tools.db_clients import get_client_by_id, get_or_create_client
     from tools.whatsapp_templates import _format_datetime
 
-    # Rebuild slot list
-    slots: list[datetime] = []
-    for iso in json.loads(session.get("slots_json") or "[]"):
-        dt = datetime.fromisoformat(iso)
-        if dt.tzinfo is None:
-            dt = TZ.localize(dt)
-        slots.append(dt.astimezone(TZ))
+    normalized = _normalize(message.get("text", {}).get("body", "")) if message.get("type") == "text" else ""
 
-    # If client says "cancel" → abort flow
-    if message.get("type") == "text":
-        normalized = _normalize(message["text"]["body"])
-        if _matches(normalized, CANCEL_KEYWORDS):
+    # Cancelación explícita → terminar sesión
+    if any(kw in normalized for kw in _STRONG_CANCEL):
+        _clear_session(wa_phone)
+        send_text_message(to=wa_phone, text="Sin problema, cuando quieras escríbenos. ¡Que tengas bonito día! 😊")
+        return
+
+    intent = parse_intent(message, context="reminder")
+    is_yes = intent == "confirm" or _matches(normalized, _AFFIRMATIVE)
+    is_no = intent == "cancel" or "no" in normalized.split()
+
+    if is_yes:
+        # Crear evento con el slot propuesto
+        proposed_iso = session.get("proposed_slot")
+        if not proposed_iso:
             _clear_session(wa_phone)
-            send_text_message(
-                to=wa_phone,
-                text="Sin problema, cuando quieras agendar tu cita escríbenos.",
-            )
             return
 
-    chosen_idx = parse_slot_index(message, slots)
-    if chosen_idx is None:
-        from tools.reschedule_handler import _format_slot_list
+        proposed = datetime.fromisoformat(proposed_iso)
+        if proposed.tzinfo is None:
+            proposed = TZ.localize(proposed)
+        end_dt = proposed + timedelta(minutes=SLOT_DURATION)
+        service = session.get("service", "Servicio")
+
+        client_id = session.get("client_id")
+        client = get_client_by_id(client_id) if client_id else None
+        if not client:
+            client, _ = get_or_create_client(name="Cliente", phone=phone_e164)
+
+        try:
+            event_id = create_event(
+                service=service,
+                client_name=client["name"],
+                phone_e164=phone_e164,
+                start_iso=proposed.isoformat(),
+                end_iso=end_dt.isoformat(),
+            )
+        except Exception as exc:
+            logger.error(f"[booking] Failed to create Calendar event: {exc}")
+            send_text_message(to=wa_phone, text="Tuve un problema al agendar. En un momento te contactamos. ¡Disculpa!")
+            return
+
+        upsert_appointment(
+            event_id,
+            client_id=client["id"],
+            service=service,
+            stylist="Por asignar",
+            start_time=proposed.isoformat(),
+            end_time=end_dt.isoformat(),
+            status="pending",
+        )
+
+        _clear_session(wa_phone)
+
+        date_str, time_str = _format_datetime(proposed.isoformat())
+        first = _first_name(client["name"])
         send_text_message(
             to=wa_phone,
             text=(
-                "Disculpa, no entendi bien. Cual de estos horarios te queda mejor?\n\n"
-                + _format_slot_list(slots)
-                + "\n\nResponde con el numero."
+                f"¡Listo, {first}! Quedaste agendada para el {date_str} "
+                f"a las {time_str} — {service}. "
+                "En breve recibirás tu confirmación. ¡Te esperamos! 💅"
             ),
         )
-        return
+        logger.info(f"[booking] Booked {client['name']} — event {event_id} at {proposed.isoformat()}")
 
-    chosen = slots[chosen_idx]
-    end_dt = chosen + timedelta(minutes=SLOT_DURATION)
-    start_iso = chosen.isoformat()
-    end_iso = end_dt.isoformat()
-    service = session.get("service", "Servicio")
+    elif is_no:
+        # Proponer el siguiente slot disponible
+        slots = _load_slots(session)
+        proposed_iso = session.get("proposed_slot", "")
+        next_slot = next((s for s in slots if s.isoformat() != proposed_iso), None)
 
-    # Get or create client
-    client_id = session.get("client_id")
-    client = get_client_by_id(client_id) if client_id else None
-    if not client:
-        client, _ = get_or_create_client(name="Cliente", phone=phone_e164)
+        if not next_slot:
+            _clear_session(wa_phone)
+            send_text_message(
+                to=wa_phone,
+                text="Por el momento no tengo más horarios disponibles. Te contactamos en cuanto tengamos un espacio. ¡Disculpa! 🙏",
+            )
+            return
 
-    # Create Google Calendar event
-    try:
-        event_id = create_event(
-            service=service,
-            client_name=client["name"],
-            phone_e164=phone_e164,
-            start_iso=start_iso,
-            end_iso=end_iso,
+        _save_session(
+            wa_phone,
+            step="ask_confirm_slot",
+            client_id=session.get("client_id"),
+            service=session.get("service"),
+            slots_json=session.get("slots_json"),
+            proposed_slot=next_slot.isoformat(),
         )
-    except Exception as exc:
-        logger.error(f"[booking] Failed to create Calendar event: {exc}")
+
+        date_str, time_str = _format_datetime(next_slot.isoformat())
         send_text_message(
             to=wa_phone,
-            text="Tuve un problema al agendar. En un momento te contactamos para confirmar.",
+            text=f"Sin problema. También tengo el {date_str} a las {time_str} — ¿te queda bien ese? 😊",
         )
-        return
 
-    # Persist in DB
-    upsert_appointment(
-        event_id,
-        client_id=client["id"],
-        service=service,
-        stylist="Por asignar",
-        start_time=start_iso,
-        end_time=end_iso,
-        status="pending",
-    )
-
-    _clear_session(wa_phone)
-
-    # Confirm to client
-    date_str, time_str = _format_datetime(start_iso)
-    send_text_message(
-        to=wa_phone,
-        text=(
-            f"Listo, {client['name']}! Tu cita quedo agendada:\n\n"
-            f"Servicio: {service}\n"
-            f"Fecha: {date_str}\n"
-            f"Hora: {time_str}\n\n"
-            "Te llegara una confirmacion en breve. Te esperamos!"
-        ),
-    )
-    logger.info(
-        f"[booking] Appointment created for {client['name']} — event {event_id} at {start_iso}"
-    )
+    else:
+        # Respuesta ambigua → pedir confirmación de nuevo
+        proposed_iso = session.get("proposed_slot", "")
+        if proposed_iso:
+            proposed = datetime.fromisoformat(proposed_iso)
+            if proposed.tzinfo is None:
+                proposed = TZ.localize(proposed)
+            date_str, time_str = _format_datetime(proposed.isoformat())
+            send_text_message(
+                to=wa_phone,
+                text=f"Disculpa, no te entendí bien. ¿El {date_str} a las {time_str} te funciona? 😊",
+            )

@@ -105,6 +105,12 @@ def init_db() -> None:
         """)
         conn.commit()
 
+        try:
+            conn.execute("ALTER TABLE booking_sessions ADD COLUMN proposed_slot TEXT")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
         print(f"[db_init] Database ready at: {DATABASE_PATH}")
     finally:
         conn.close()

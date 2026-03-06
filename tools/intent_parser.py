@@ -149,6 +149,90 @@ def parse_intent(message: dict, context: str = "reminder") -> str:
 
 # ── Slot selection parsing ──────────────────────────────────────────────────────
 
+_TIME_OF_DAY = {
+    "manana": (9, 11),
+    "mediodia": (12, 13),
+    "tarde": (14, 17),
+    "noche": (17, 19),
+}
+
+_ANY_SLOT_KEYWORDS = {
+    "cualquier", "el que sea", "que sea", "antes posible",
+    "lo antes", "indiferente", "lo mismo", "cual sea",
+}
+
+
+def parse_preferred_slot(message: dict, slots: list) -> "int | None":
+    """
+    Mapea preferencia de día/hora en texto libre al mejor slot disponible.
+    Devuelve índice, o None si no se detectó preferencia útil.
+    """
+    if not slots:
+        return 0
+
+    if message.get("type") != "text":
+        return None
+
+    raw = message.get("text", {}).get("body", "")
+    normalized = _normalize(raw)
+
+    if any(kw in normalized for kw in _ANY_SLOT_KEYWORDS):
+        return 0
+
+    preferred_weekday: "int | None" = None
+    for name, weekday in _DAY_NAMES.items():
+        if name in normalized:
+            preferred_weekday = weekday
+            break
+
+    import datetime as _dt_mod
+    import pytz as _pytz
+    _TZ = _pytz.timezone("America/Mexico_City")
+    today = _dt_mod.datetime.now(_TZ).date()
+
+    preferred_date: "object | None" = None
+    if re.search(r"\bmanana\b", normalized) and preferred_weekday is None:
+        preferred_date = today + _dt_mod.timedelta(days=1)
+    elif "hoy" in normalized:
+        preferred_date = today
+    elif "pasado" in normalized and "manana" in normalized:
+        preferred_date = today + _dt_mod.timedelta(days=2)
+
+    preferred_hour: "int | None" = None
+    time_match = re.search(r"las?\s+(\d{1,2})(?::(\d{2}))?(?:\s*(am|pm))?", normalized)
+    if time_match:
+        h = int(time_match.group(1))
+        if time_match.group(3) == "pm" and h < 12:
+            h += 12
+        elif not time_match.group(3) and h < 8:
+            h += 12
+        preferred_hour = h
+    else:
+        for kw, (h_min, h_max) in _TIME_OF_DAY.items():
+            if kw in normalized:
+                preferred_hour = (h_min + h_max) // 2
+                break
+
+    if preferred_weekday is None and preferred_date is None and preferred_hour is None:
+        return None
+
+    best_idx = 0
+    best_score = float("inf")
+    for i, slot in enumerate(slots):
+        score = 0.0
+        if preferred_date is not None and slot.date() != preferred_date:
+            score += 200
+        if preferred_weekday is not None and slot.weekday() != preferred_weekday:
+            score += 100
+        if preferred_hour is not None:
+            score += abs(slot.hour - preferred_hour) * 2
+        if score < best_score:
+            best_score = score
+            best_idx = i
+
+    return best_idx
+
+
 _ORDINALS = {
     "1": 0, "uno": 0, "primero": 0, "primera": 0,
     "2": 1, "dos": 1, "segundo": 1, "segunda": 1,
