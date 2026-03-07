@@ -57,7 +57,7 @@ def booking_confirmation(
     date_str, time_str = _format_datetime(start_time_iso)
     return {
         "template_name": "time4me_confirmacion_cita",
-        "params": [client_name, service, date_str, time_str],
+        "params": [client_name, service, date_str, time_str, stylist],
     }
 
 
@@ -72,10 +72,10 @@ def appointment_reminder(
     Sent the morning before the appointment. Natural conversational tone — no buttons.
     Client responds freely and Claude interprets the intent.
     """
-    _, time_str = _format_datetime(start_time_iso)
+    date_str, time_str = _format_datetime(start_time_iso)
     return {
         "template_name": "time4me_recordatorio_cita",
-        "params": [client_name, service, time_str],
+        "params": [client_name, service, date_str, time_str, stylist],
     }
 
 
