@@ -87,10 +87,13 @@ def update_client(client_id: int, **fields) -> Optional[dict]:
 def get_or_create_client(name: str, phone: str) -> tuple[dict, bool]:
     """
     Look up client by phone. Create if not found.
+    If found and name differs, update it from Calendar.
     Returns (client_dict, was_created).
     """
     existing = get_client_by_phone(phone)
     if existing:
+        if name and existing["name"] != name:
+            existing = update_client(existing["id"], name=name)
         return existing, False
     client = create_client(name, phone)
     return client, True
