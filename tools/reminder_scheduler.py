@@ -32,6 +32,11 @@ def sync_calendar_to_db() -> None:
         events = get_upcoming_events(hours_ahead=72)
     except Exception as exc:
         logger.error(f"[scheduler] sync_calendar_to_db: failed to read calendar — {exc}")
+        try:
+            from tools.alert_handler import send_critical_alert
+            send_critical_alert("calendar_sync_failed", str(exc))
+        except Exception:
+            pass
         return
 
     for event in events:
@@ -141,36 +146,6 @@ def send_reminders() -> None:
             logger.error(f"[scheduler] Failed to send reminder for appt {appt['id']}: {exc}")
 
 
-def send_upsell_prompts() -> None:
-    """Send upsell prompt at 9:30 AM (30 min after reminders)."""
-    from tools.db_appointments import get_appointments_needing_upsell, mark_upsell_sent
-    from tools.db_clients import get_client_by_id
-    from tools.whatsapp_sender import send_template_message
-    from tools.whatsapp_templates import upsell_prompt
-    from tools.phone_normalizer import to_whatsapp_format
-
-    appointments = get_appointments_needing_upsell()
-    logger.info(f"[scheduler] send_upsell_prompts: {len(appointments)} to send")
-
-    for appt in appointments:
-        client = get_client_by_id(appt["client_id"])
-        if not client:
-            continue
-        wa_phone = to_whatsapp_format(client["phone"])
-        template = upsell_prompt(client_name=client["name"])
-        try:
-            send_template_message(
-                to=wa_phone,
-                template=template,
-                appointment_id=appt["id"],
-                client_id=client["id"],
-            )
-            mark_upsell_sent(appt["id"])
-            logger.info(f"[scheduler] Upsell sent for appointment {appt['id']}")
-        except Exception as exc:
-            logger.error(f"[scheduler] Failed to send upsell for appt {appt['id']}: {exc}")
-
-
 def mark_no_shows() -> None:
     """Mark past appointments without a completion status as no_show."""
     from tools.db_appointments import get_no_show_candidates, update_appointment_status, get_appointment_by_id
@@ -242,14 +217,6 @@ def create_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
 
-    # Upsell: daily at 9:30 AM Mexico City time
-    scheduler.add_job(
-        send_upsell_prompts,
-        trigger=CronTrigger(hour=9, minute=30, timezone=TZ),
-        id="send_upsell",
-        replace_existing=True,
-    )
-
     # No-show marking: daily at 8:00 PM Mexico City time
     scheduler.add_job(
         mark_no_shows,
@@ -258,4 +225,53 @@ def create_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
 
+    # Token check: daily at 8:00 AM Mexico City time
+    from tools.token_checker import check_whatsapp_token
+    scheduler.add_job(
+        check_whatsapp_token,
+        trigger=CronTrigger(hour=8, minute=0, timezone=TZ),
+        id="check_token",
+        replace_existing=True,
+    )
+
+    # DB backup: daily at 2:00 AM Mexico City time
+    scheduler.add_job(
+        _backup_db_job,
+        trigger=CronTrigger(hour=2, minute=0, timezone=TZ),
+        id="backup_db",
+        replace_existing=True,
+    )
+
+    # Sheets sync: every 30 minutes (keeps owner panel up to date)
+    scheduler.add_job(
+        _sheets_sync_job,
+        trigger="interval",
+        minutes=30,
+        id="sheets_sync",
+        replace_existing=True,
+    )
+
     return scheduler
+
+
+def _sheets_sync_job() -> None:
+    """Sync periódico a Google Sheets. No-op si GOOGLE_SHEETS_ID no está configurado."""
+    try:
+        from tools.sheets_sync import sync_all_to_sheets
+        sync_all_to_sheets()
+    except Exception as exc:
+        logger.error(f"[scheduler] sheets_sync falló: {exc}")
+
+
+def _backup_db_job() -> None:
+    """Wrapper para el job de backup con manejo de errores y alerta."""
+    try:
+        from tools.backup_handler import backup_db_to_drive
+        backup_db_to_drive()
+    except Exception as exc:
+        logger.error(f"[scheduler] backup_db falló: {exc}")
+        try:
+            from tools.alert_handler import send_critical_alert
+            send_critical_alert("backup_failed", str(exc))
+        except Exception:
+            pass

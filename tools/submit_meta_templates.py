@@ -1,5 +1,5 @@
 """
-submit_meta_templates.py — Submit the 6 WhatsApp message templates to Meta for approval.
+submit_meta_templates.py — Submit the 5 WhatsApp message templates to Meta for approval.
 
 Run once. Templates take 24-48h to be approved by Meta.
 If a template already exists, it is reported as such (not re-submitted).
@@ -30,7 +30,7 @@ ALREADY_EXISTS_SUBCODES = {136003, 2388024}
 # ---------------------------------------------------------------------------
 
 TEMPLATES = [
-    # 1. Booking confirmation (5 params: name, service, date, time, stylist)
+    # 1. Booking confirmation (4 params: name, service, date, time) — no buttons, warm tone
     {
         "name": "time4me_confirmacion_cita",
         "language": "es_MX",
@@ -39,25 +39,20 @@ TEMPLATES = [
             {
                 "type": "BODY",
                 "text": (
-                    "Hola {{1}}, tu cita en *Time 4 me Nail Salon* esta confirmada!\n\n"
-                    "Servicio: {{2}}\n"
-                    "Fecha: {{3}}\n"
-                    "Hora: {{4}}\n"
-                    "Estilista: {{5}}\n"
-                    "Av. Ruben Dario 1206, Providencia 2a. Secc, Guadalajara\n\n"
-                    "Te esperamos!"
+                    "Hola {{1}}! Somos del salon Time 4 me, te avisamos que tu cita de {{2}} "
+                    "quedo lista para el {{3}} a las {{4}}. "
+                    "Si necesitas cambiar algo, aqui estamos."
                 ),
                 "example": {
                     "body_text": [[
-                        "Maria", "Unas acrilicas",
-                        "lunes 10 de marzo", "11:00 a.m.", "Carmen"
+                        "Maria", "unas acrilicas", "lunes 10 de marzo", "11:00 a.m."
                     ]]
                 },
             }
         ],
     },
 
-    # 2. Appointment reminder (5 params: name, service, date, time, stylist) + 3 quick-reply buttons
+    # 2. Appointment reminder (3 params: name, service, time) — no buttons, conversational
     {
         "name": "time4me_recordatorio_cita",
         "language": "es_MX",
@@ -66,27 +61,12 @@ TEMPLATES = [
             {
                 "type": "BODY",
                 "text": (
-                    "Hola {{1}}, manana tienes cita con nosotros:\n\n"
-                    "Servicio: {{2}}\n"
-                    "Fecha: {{3}}\n"
-                    "Hora: {{4}}\n"
-                    "Estilista: {{5}}\n\n"
-                    "Confirmas tu cita?"
+                    "Hola {{1}}! Te recuerdo que manana tienes tu cita de {{2}} a las {{3}} "
+                    "en Time 4 me. Todo bien para manana?"
                 ),
                 "example": {
-                    "body_text": [[
-                        "Maria", "Unas acrilicas",
-                        "martes 11 de marzo", "11:00 a.m.", "Carmen"
-                    ]]
+                    "body_text": [["Maria", "unas acrilicas", "11:00 a.m."]]
                 },
-            },
-            {
-                "type": "BUTTONS",
-                "buttons": [
-                    {"type": "QUICK_REPLY", "text": "Confirmar"},
-                    {"type": "QUICK_REPLY", "text": "Cancelar"},
-                    {"type": "QUICK_REPLY", "text": "Hablar con alguien"},
-                ],
             },
         ],
     },
@@ -110,29 +90,7 @@ TEMPLATES = [
         ],
     },
 
-    # 4. Upsell prompt (1 param: name) — MARKETING category
-    {
-        "name": "time4me_upsell_servicios",
-        "language": "es_MX",
-        "category": "MARKETING",
-        "components": [
-            {
-                "type": "BODY",
-                "text": (
-                    "Hola {{1}}, ya casi es tu cita!\n\n"
-                    "Te gustaria agregar algun servicio extra?\n"
-                    "Diseno especial / Spa de manos / Exfoliacion de pies\n\n"
-                    "Responde SI si quieres que te cotizamos, o NO si por ahora esta bien.\n\n"
-                    "Nos vemos manana!"
-                ),
-                "example": {
-                    "body_text": [["Maria"]]
-                },
-            }
-        ],
-    },
-
-    # 5. No-show follow-up (1 param: name)
+    # 4. No-show follow-up (1 param: name)
     {
         "name": "time4me_noshow_reagendar",
         "language": "es_MX",

@@ -1,4 +1,5 @@
 """
+DEPRECATED: replaced by tools/claude_agent.py
 intent_parser.py — Parse a WhatsApp message to detect client intent.
 
 Handles both structured button payloads (interactive quick-replies)
@@ -19,7 +20,7 @@ import re
 CONFIRM_KEYWORDS = {
     "si", "sí", "confirmo", "confirmado", "ok", "okay", "de acuerdo",
     "perfecto", "ahi estare", "ahí estaré", "claro", "va", "dale",
-    "listo", "voy", "alli estare", "allí estaré", "por supuesto",
+    "listo", "alli estare", "allí estaré", "por supuesto",
     "con gusto", "ahi voy", "ahí voy",
 }
 

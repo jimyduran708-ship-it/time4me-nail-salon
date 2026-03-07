@@ -51,12 +51,13 @@ def booking_confirmation(
 ) -> dict:
     """
     Template: time4me_confirmacion_cita
-    Sent immediately when appointment is created in Google Calendar.
+    Sent when a new appointment is synced from Google Calendar.
+    Includes quick-reply buttons so the client can act immediately.
     """
     date_str, time_str = _format_datetime(start_time_iso)
     return {
         "template_name": "time4me_confirmacion_cita",
-        "params": [client_name, service, date_str, time_str, stylist],
+        "params": [client_name, service, date_str, time_str],
     }
 
 
@@ -68,18 +69,13 @@ def appointment_reminder(
 ) -> dict:
     """
     Template: time4me_recordatorio_cita
-    Sent the morning before the appointment with interactive buttons.
-    Includes quick-reply buttons for confirm / cancel / human.
+    Sent the morning before the appointment. Natural conversational tone — no buttons.
+    Client responds freely and Claude interprets the intent.
     """
-    date_str, time_str = _format_datetime(start_time_iso)
+    _, time_str = _format_datetime(start_time_iso)
     return {
         "template_name": "time4me_recordatorio_cita",
-        "params": [client_name, service, date_str, time_str, stylist],
-        "buttons": [
-            {"type": "reply", "reply": {"id": "CONFIRM", "title": "Confirmar ✅"}},
-            {"type": "reply", "reply": {"id": "CANCEL", "title": "Cancelar ❌"}},
-            {"type": "reply", "reply": {"id": "HUMAN", "title": "Hablar con alguien 💬"}},
-        ],
+        "params": [client_name, service, time_str],
     }
 
 

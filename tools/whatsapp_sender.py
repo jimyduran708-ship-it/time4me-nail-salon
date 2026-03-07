@@ -55,6 +55,15 @@ def _post_with_retry(payload: dict) -> dict:
             resp.raise_for_status()
 
     logger.error(f"[whatsapp] All retries exhausted. Last status: {last_error.status_code}")
+    if last_error.status_code == 401:
+        try:
+            from tools.alert_handler import send_critical_alert
+            send_critical_alert(
+                "token_expired",
+                "El WHATSAPP_ACCESS_TOKEN devolvió 401. Renueva el token en Railway.",
+            )
+        except Exception:
+            pass
     last_error.raise_for_status()
 
 

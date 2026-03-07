@@ -111,6 +111,15 @@ def init_db() -> None:
         except Exception:
             pass  # column already exists
 
+        # Migration: clear stale state from old keyword-based handlers
+        # (booking_handler and reschedule_handler replaced by claude_agent)
+        try:
+            conn.execute("DELETE FROM booking_sessions")
+            conn.execute("UPDATE appointments SET reschedule_state = NULL WHERE reschedule_state IS NOT NULL")
+            conn.commit()
+        except Exception:
+            pass
+
         print(f"[db_init] Database ready at: {DATABASE_PATH}")
     finally:
         conn.close()

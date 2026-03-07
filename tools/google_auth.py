@@ -16,15 +16,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+DEFAULT_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 _ENV_KEY = "GOOGLE_SERVICE_ACCOUNT_JSON"
 
 
-def get_credentials() -> service_account.Credentials:
+def get_credentials(scopes: list[str] | None = None) -> service_account.Credentials:
     """
     Load service account credentials from env.
     Raises ValueError if the env var is missing or malformed.
+
+    Args:
+        scopes: OAuth2 scopes to request. Defaults to Calendar-only.
     """
+    active_scopes = scopes if scopes is not None else DEFAULT_SCOPES
+
     raw = os.getenv(_ENV_KEY, "").strip()
     if not raw:
         raise ValueError(
@@ -36,8 +41,8 @@ def get_credentials() -> service_account.Credentials:
     # Detect JSON string vs file path
     if raw.startswith("{"):
         info = json.loads(raw)
-        return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        return service_account.Credentials.from_service_account_info(info, scopes=active_scopes)
     else:
         if not os.path.exists(raw):
             raise FileNotFoundError(f"Service account file not found: {raw}")
-        return service_account.Credentials.from_service_account_file(raw, scopes=SCOPES)
+        return service_account.Credentials.from_service_account_file(raw, scopes=active_scopes)

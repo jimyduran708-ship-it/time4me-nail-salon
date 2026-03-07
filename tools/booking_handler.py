@@ -1,4 +1,5 @@
 """
+DEPRECATED: replaced by tools/claude_agent.py + _execute_action() in app.py
 booking_handler.py — Multi-turn booking flow via WhatsApp.
 
 Allows clients (known or new) to book an appointment directly through WhatsApp.

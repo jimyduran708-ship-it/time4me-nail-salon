@@ -1,4 +1,5 @@
 """
+DEPRECATED: replaced by tools/claude_agent.py + _execute_action() in app.py
 reschedule_handler.py — Flujo multi-turno de reagendamiento.
 
 Turno 1: initiate_reschedule — busca slots, envía opciones, guarda estado en DB.
